@@ -1,0 +1,157 @@
+// ============================================================================
+// SPECTO - Prisma Schema
+// ----------------------------------------------------------------------------
+// Skema ini mereplikasi 1:1 struktur database PostgreSQL "specto_db" yang
+// sebelumnya dibuat oleh TypeORM (synchronize:true). Nama tabel, kolom, tipe,
+// default, index, dan unique constraint dipetakan persis agar DATA LAMA TETAP
+// UTUH dan aplikasi langsung berfungsi tanpa migrasi yang merusak data.
+//
+// Mulai sekarang, SEMUA perubahan struktur database cukup diatur dari file ini
+// lalu jalankan `npx prisma db push` (tidak perlu buka pgAdmin).
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUM ROLE USER (dipetakan ke type "users_role_enum" di Postgres) ---
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+
+  @@map("users_role_enum")
+}
+
+// --- TABEL: users ---
+model User {
+  id             Int      @id @default(autoincrement())
+  fullName       String   @db.VarChar
+  email          String   @unique(map: "UQ_97672ac88f789774dd47f7c8be3") @db.VarChar
+  whatsappNumber String?  @db.VarChar
+  username       String?  @unique(map: "UQ_fe0bb3f6520ee0469504521e710") @db.VarChar
+  passwordHash   String   @db.VarChar
+  role           UserRole @default(OPERATOR)
+  department     String?  @default("AUT") @db.VarChar
+  createdAt      DateTime @default(now()) @db.Timestamp(6)
+  updatedAt      DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  menuAccess     String[] @default([])
+
+  @@map("users")
+}
+
+// --- TABEL: incidents (log kejadian abnormal sensor) ---
+model Incident {
+  id               Int       @id @default(autoincrement())
+  trigger_reason   String    @db.VarChar
+  value_at_trigger Float?
+  is_resolved      Boolean   @default(false)
+  start_time       DateTime  @default(now()) @db.Timestamptz(6)
+  end_time         DateTime? @db.Timestamptz(6)
+  annotation       String?   @db.VarChar
+  device_id        String    @default("specto-server") @db.VarChar
+
+  @@index([device_id], map: "IDX_e986e185e07c240e68f32c442d")
+  @@map("incidents")
+}
+
+// --- TABEL: specto_data (data sensor mentah / raw) ---
+model SpectoData {
+  id          Int      @id @default(autoincrement())
+  temperature Float
+  humidity    Float
+  smoke_level Int
+  flame_level Int
+  is_abnormal Boolean  @default(false)
+  device_id   String   @default("specto-server") @db.VarChar
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([device_id, created_at], map: "IDX_32f75327418f941cfa1a1622b7")
+  @@map("specto_data")
+}
+
+// --- TABEL: specto_hourly (agregasi per-jam) ---
+model SpectoHourly {
+  id          Int      @id @default(autoincrement())
+  time_bucket DateTime @db.Timestamptz(6)
+  avg_temp    Float
+  avg_hum     Float
+  max_smoke   Float
+  max_flame   Float
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  device_id   String   @default("specto-server") @db.VarChar
+
+  @@index([device_id, time_bucket], map: "IDX_5f1d378fc2cdac2a338979d018")
+  @@map("specto_hourly")
+}
+
+// --- TABEL: specto_daily (agregasi per-hari) ---
+model SpectoDaily {
+  id          Int      @id @default(autoincrement())
+  date_bucket DateTime @db.Date
+  avg_temp    Float
+  avg_hum     Float
+  max_smoke   Float
+  max_flame   Float
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  device_id   String   @default("specto-server") @db.VarChar
+
+  @@index([device_id, date_bucket], map: "IDX_6829cdcb113db8b176e18482a8")
+  @@map("specto_daily")
+}
+
+// --- TABEL: maintenance_settings (pengaturan pengingat maintenance) ---
+model MaintenanceSetting {
+  id                 Int       @id @default(autoincrement())
+  reminder_day       Int       @default(15)
+  is_enabled         Boolean   @default(true)
+  recipients         String[]  @default([]) @db.VarChar
+  reminder_time      String    @default("07:00") @db.VarChar
+  last_reminder_sent DateTime? @db.Timestamptz(6)
+
+  @@map("maintenance_settings")
+}
+
+// --- TABEL: maintenance_tasks (daftar task maintenance) ---
+model MaintenanceTask {
+  id              Int     @id @default(autoincrement())
+  title           String  @db.VarChar
+  description     String? @db.VarChar
+  isDefaultWeekly Boolean @default(false)
+
+  @@map("maintenance_tasks")
+}
+
+// --- TABEL: maintenance_records (riwayat checksheet maintenance) ---
+model MaintenanceRecord {
+  id           Int       @id @default(autoincrement())
+  date         DateTime  @db.Date
+  technician   String    @db.VarChar
+  items        Json      @default("[]")
+  totalChecks  Int       @default(0)
+  passedChecks Int       @default(0)
+  failedChecks Int       @default(0)
+  completedAt  DateTime? @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @db.Timestamp(6)
+
+  @@map("maintenance_records")
+}
+
+// --- TABEL: sensor_settings (ambang batas sensor, dapat diubah dari aplikasi) ---
+model SensorSetting {
+  id         Int      @id @default(autoincrement())
+  temp_min   Float    @default(18)
+  temp_max   Float    @default(27)
+  hum_min    Float    @default(20)
+  hum_max    Float    @default(80)
+  smoke_max  Int      @default(4000)
+  flame_min  Int      @default(200)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("sensor_settings")
+}
