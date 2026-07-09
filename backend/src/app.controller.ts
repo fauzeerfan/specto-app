@@ -5,8 +5,9 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  /** Health-check root. GET / -> status API Specto. */
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  getHealth() {
+    return this.appService.getHealth();
   }
 }

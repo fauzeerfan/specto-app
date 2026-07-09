@@ -7,7 +7,7 @@ export const apiClient = axios.create({
   withCredentials: true,
 });
 
-// ✅ INTERCEPTOR YANG SUDAH ADA TETAP SAMA
+// Interceptor: catat error lalu teruskan ke pemanggil (ditangani per-halaman).
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {

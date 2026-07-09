@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
+import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
-import cookieParser from 'cookie-parser'; // Ubah import ini (hapus * as)
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -19,9 +20,9 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
-  // Listen ke 0.0.0.0 agar bisa diakses dari network lain
+  // Listen ke 0.0.0.0 agar dapat diakses dari perangkat/host lain di jaringan.
   await app.listen(process.env.PORT || 3001, '0.0.0.0');
-  
-  console.log(`Application is running on: ${await app.getUrl()}`);
+
+  Logger.log(`Specto API berjalan di: ${await app.getUrl()}`, 'Bootstrap');
 }
 bootstrap();

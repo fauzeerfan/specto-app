@@ -1,11 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 
+/** Jendela throttle: insiden sensor yang sama diabaikan bila terjadi < 1 menit lalu. */
+const INCIDENT_THROTTLE_MS = 60_000;
+
 @Injectable()
 export class IncidentsService {
+  private readonly logger = new Logger(IncidentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
@@ -13,46 +18,33 @@ export class IncidentsService {
     private readonly whatsappService: WhatsappService,
   ) {}
 
-  // Helper: Mendapatkan target notifikasi untuk Specto Server.
-  // Target = seluruh ADMIN + user department SDC (non-admin).
-  private async getIncidentNotificationTargets(deviceId: string) {
+  /**
+   * Target notifikasi insiden = seluruh ADMIN (lintas department) +
+   * user department SDC yang bukan admin.
+   */
+  private async getIncidentNotificationTargets(_deviceId: string) {
     const allUsers = await this.usersService.findAll();
-    const targets = new Set<any>();
+    const targets = new Set<(typeof allUsers)[number]>();
 
-    console.log(`[DEBUG] Device ID: ${deviceId}`);
-    console.log(`[DEBUG] Total users: ${allUsers.length}`);
+    allUsers.filter((u) => u.role === 'ADMIN').forEach((u) => targets.add(u));
+    allUsers
+      .filter((u) => u.department === 'SDC' && u.role !== 'ADMIN')
+      .forEach((u) => targets.add(u));
 
-    // Selalu tambahkan semua ADMIN (tanpa melihat department)
-    const admins = allUsers.filter((u) => u.role === 'ADMIN');
-    console.log(`[DEBUG] Found ${admins.length} admins`);
-    admins.forEach((admin) => targets.add(admin));
-
-    // Tambahkan user department SDC (bukan admin) untuk Specto Server
-    const sdcUsers = allUsers.filter((u) => u.department === 'SDC' && u.role !== 'ADMIN');
-    console.log(`[DEBUG] Found ${sdcUsers.length} SDC users (non-admin)`);
-    sdcUsers.forEach((user) => targets.add(user));
-
-    console.log(`[DEBUG] Total notification targets: ${targets.size}`);
     return Array.from(targets);
   }
 
-  // Mencatat incident baru dengan Device ID dan mengirim notifikasi
+  /** Mencatat insiden baru untuk sebuah device dan mengirim notifikasi (email + WA). */
   async createIncident(deviceId: string, sensorType: string, value: number, details: string) {
-    // Cek kejadian terakhir untuk sensor yang sama PADA DEVICE YANG SAMA
+    // Rising-edge throttle: hindari spam saat kondisi bahaya berlangsung lama.
     const lastIncident = await this.prisma.incident.findFirst({
-      where: {
-        device_id: deviceId,
-        trigger_reason: sensorType,
-      },
+      where: { device_id: deviceId, trigger_reason: sensorType },
       orderBy: { start_time: 'desc' },
     });
 
-    // Throttling: Skip jika kejadian yang sama terjadi < 1 menit lalu
     if (lastIncident) {
-      const diff = new Date().getTime() - new Date(lastIncident.start_time).getTime();
-      if (diff < 60000) {
-        return null;
-      }
+      const diff = Date.now() - new Date(lastIncident.start_time).getTime();
+      if (diff < INCIDENT_THROTTLE_MS) return null;
     }
 
     const savedIncident = await this.prisma.incident.create({
@@ -65,13 +57,11 @@ export class IncidentsService {
       },
     });
 
-    // KIRIM NOTIFIKASI ABNORMAL
     await this.sendIncidentNotifications(deviceId, sensorType, value, details);
-
     return savedIncident;
   }
 
-  // Mengirim notifikasi incident berdasarkan device_id
+  /** Mengirim notifikasi insiden ke email & WhatsApp target. */
   private async sendIncidentNotifications(
     deviceId: string,
     sensorType: string,
@@ -79,48 +69,43 @@ export class IncidentsService {
     details: string,
   ) {
     try {
-      const notificationTargets = await this.getIncidentNotificationTargets(deviceId);
-
-      if (notificationTargets.length === 0) {
-        console.log(`[IncidentService] No notification targets for device: ${deviceId}`);
+      const targets = await this.getIncidentNotificationTargets(deviceId);
+      if (targets.length === 0) {
+        this.logger.warn(`Tidak ada target notifikasi untuk device: ${deviceId}`);
         return;
       }
 
       const incidentData = {
         sensor: sensorType,
-        value: value,
+        value,
         description: details,
         device: deviceId,
         time: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
       };
 
-      // Kirim Email
-      const emailRecipients = notificationTargets
-        .map((user) => user.email)
-        .filter((email) => email && email.trim() !== '');
-
+      const emailRecipients = targets
+        .map((u) => u.email)
+        .filter((email): email is string => !!email && email.trim() !== '');
       if (emailRecipients.length > 0) {
         await this.mailService.sendIncidentAlert(emailRecipients, incidentData);
       }
 
-      // Kirim WhatsApp
-      const waRecipients = notificationTargets
-        .map((user) => user.whatsappNumber)
-        .filter((wa) => wa && wa.trim() !== '');
-
+      const waRecipients = targets
+        .map((u) => u.whatsappNumber)
+        .filter((wa): wa is string => !!wa && wa.trim() !== '');
       if (waRecipients.length > 0) {
         await this.whatsappService.sendIncidentAlert(waRecipients, incidentData);
       }
 
-      console.log(`[IncidentService] Incident notifications sent for device: ${deviceId}`);
-      console.log(`[IncidentService] Email to: ${emailRecipients.length} recipients`);
-      console.log(`[IncidentService] WhatsApp to: ${waRecipients.length} recipients`);
+      this.logger.log(
+        `Notifikasi insiden [${deviceId}] terkirim -> email: ${emailRecipients.length}, WA: ${waRecipients.length}`,
+      );
     } catch (error) {
-      console.error('[IncidentService] Error sending incident notifications:', error);
+      this.logger.error(`Gagal mengirim notifikasi insiden: ${(error as Error).message}`);
     }
   }
 
-  // Mengambil incident terakhir, opsional filter by Device ID
+  /** Mengambil 20 insiden terakhir, opsional difilter per device. */
   async findRecent(deviceId?: string) {
     return this.prisma.incident.findMany({
       where: deviceId ? { device_id: deviceId } : {},
@@ -129,13 +114,10 @@ export class IncidentsService {
     });
   }
 
-  // Method untuk menandai incident sebagai resolved
+  /** Menandai insiden sebagai selesai (resolved). */
   async resolveIncident(incidentId: number, annotation?: string) {
     const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
-
-    if (!incident) {
-      throw new Error(`Incident with ID ${incidentId} not found`);
-    }
+    if (!incident) throw new Error(`Incident with ID ${incidentId} not found`);
 
     return this.prisma.incident.update({
       where: { id: incidentId },
@@ -147,13 +129,10 @@ export class IncidentsService {
     });
   }
 
-  // Method untuk mendapatkan semua incident yang belum resolved
+  /** Mengambil insiden yang belum resolved, opsional per device. */
   async findActiveIncidents(deviceId?: string) {
     return this.prisma.incident.findMany({
-      where: {
-        is_resolved: false,
-        ...(deviceId ? { device_id: deviceId } : {}),
-      },
+      where: { is_resolved: false, ...(deviceId ? { device_id: deviceId } : {}) },
       orderBy: { start_time: 'desc' },
     });
   }

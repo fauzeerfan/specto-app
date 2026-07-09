@@ -1,7 +1,13 @@
 # compiled output
 /dist
-/node_modules
 /build
+
+# dependencies (match node_modules di level manapun, termasuk yang tidak sengaja
+# ter-install di dalam src)
+node_modules/
+
+# Prisma
+/prisma/*.db
 
 # Logs
 logs

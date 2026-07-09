@@ -486,11 +486,9 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ deviceId }) =
   const fetchLatest = async () => {
     try {
       const url = getApiUrl(`/api/specto-data/latest?deviceId=${deviceId}`);
-      console.log('[MonitoringDashboard] Fetching latest from:', url);
       const res = await fetch(url);
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
       const rawData = await res.json();
-      console.log('[MonitoringDashboard] Raw latest data:', rawData);
       if (!rawData) { setLatest(null); setConnectionStatus('disconnected'); return; }
 
       const now = new Date();
@@ -511,8 +509,8 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ deviceId }) =
       };
       setLatest(mappedData);
       setConnectionStatus('connected');
-    } catch (err) {
-      console.error('[MonitoringDashboard] fetchLatest error:', err);
+    } catch {
+      // Gagal mengambil data terbaru -> tandai perangkat sebagai terputus.
       setLatest(null);
       setConnectionStatus('disconnected');
     }

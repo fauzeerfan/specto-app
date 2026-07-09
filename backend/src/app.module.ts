@@ -11,6 +11,7 @@ import { MailModule } from './mail/mail.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { AuthModule } from './auth/auth.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
+import { DeviceMonitorModule } from './device-monitor/device-monitor.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     MailModule,
     WhatsappModule,
     MaintenanceModule,
+    DeviceMonitorModule,
   ],
 })
 export class AppModule {}
